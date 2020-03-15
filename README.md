@@ -10,8 +10,7 @@ Vá até a pasta do servidor e digite o seguinte comando no terminal:
 Após isso o servidor estará rodando na porta `8080`.
 
 Para verificar alguma hash, basta passar a hash como parâmetro. Para fins de verificação, o servidor possui uma rota para 
-testar a hash de maneira síncrona (`localhost:8080/sync`) e assíncrona (`localhost:8080/async`). Assim, para testar uma hash, 
-basta passá-la como parâmetro.
+testar a hash de maneira síncrona (`localhost:8080/sync`) e assíncrona (`localhost:8080/async`). 
 
 Por exemplo:
 
