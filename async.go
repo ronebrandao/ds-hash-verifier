@@ -11,10 +11,9 @@ import (
 	"sync"
 )
 
-var lines chan string
+//var lines chan string
 var found chan bool
 var desiredHash string
-var root = "server/files/"
 
 func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
@@ -34,39 +33,31 @@ func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileName, err := SaveFile(file)
+	filePath, err := SaveFile(file)
 
 	if err != nil {
 		fmt.Fprint(w, "Ocorreu um erro ao salvar o arquivo em disco.", err)
 		return
 	}
 
-	err = PartitionFile("files/" + *fileName)
+	err = PartitionFile(filePath)
 
 	if err != nil {
 		fmt.Fprint(w, "Erro ao dividir arquivo.", err)
 		return
 	}
 
-	lines = make(chan string, 1000)
 	found = make(chan bool, 1)
 
-	wg := sync.WaitGroup{}
+	collectorWg := sync.WaitGroup{}
+	collectorWg.Add(4)
 
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
+	go collector(ctx, cancel, filePath+"/xaa", &collectorWg)
+	go collector(ctx, cancel, filePath+"/xab", &collectorWg)
+	go collector(ctx, cancel, filePath+"/xac", &collectorWg)
+	go collector(ctx, cancel, filePath+"/xad", &collectorWg)
 
-		go worker(ctx, cancel, &wg)
-	}
-
-	wg.Add(4)
-
-	go collector(root+"/xaa.txt", lines, &wg)
-	go collector(root+"/xab.txt", lines, &wg)
-	go collector(root+"/xac.txt", lines, &wg)
-	go collector(root+"/xad.txt", lines, &wg)
-
-	wg.Wait()
+	collectorWg.Wait()
 
 	close(found)
 	wasFound := <-found
@@ -78,19 +69,34 @@ func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func collector(fileName string, lines chan string, wg *sync.WaitGroup) {
+func collector(ctx context.Context, cancel context.CancelFunc, fileName string, wg *sync.WaitGroup) {
 	defer wg.Done()
+	lines := make(chan string, 1000)
 
 	file, _ := os.Open(fileName)
 
 	scanner := bufio.NewScanner(file)
 
-	for scanner.Scan() {
-		lines <- scanner.Text()
+	go func() {
+		defer close(lines)
+
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+
+	wg2 := sync.WaitGroup{}
+
+	for i := 0; i < 4; i++ {
+		wg2.Add(1)
+
+		go worker(ctx, cancel, lines, &wg2)
 	}
+
+	wg2.Wait()
 }
 
-func worker(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup) {
+func worker(ctx context.Context, cancel context.CancelFunc, lines chan string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
