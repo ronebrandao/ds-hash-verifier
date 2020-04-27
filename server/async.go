@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"crypto/md5"
 	"fmt"
-	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 )
@@ -14,6 +14,7 @@ import (
 var lines chan string
 var found chan bool
 var desiredHash string
+var root = "server/files/"
 
 func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
@@ -33,9 +34,19 @@ func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var buf bytes.Buffer
+	fileName, err := SaveFile(file)
 
-	io.Copy(&buf, file)
+	if err != nil {
+		fmt.Fprint(w, "Ocorreu um erro ao salvar o arquivo em disco.", err)
+		return
+	}
+
+	err = PartitionFile("files/" + *fileName)
+
+	if err != nil {
+		fmt.Fprint(w, "Erro ao dividir arquivo.", err)
+		return
+	}
 
 	lines = make(chan string, 1000)
 	found = make(chan bool, 1)
@@ -48,7 +59,12 @@ func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 		go worker(ctx, cancel, &wg)
 	}
 
-	go collector(buf, lines)
+	wg.Add(4)
+
+	go collector(root+"/xaa.txt", lines, &wg)
+	go collector(root+"/xab.txt", lines, &wg)
+	go collector(root+"/xac.txt", lines, &wg)
+	go collector(root+"/xad.txt", lines, &wg)
 
 	wg.Wait()
 
@@ -62,20 +78,16 @@ func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func collector(buf bytes.Buffer, lines chan string) {
-	for {
-		b, err := buf.ReadBytes('\n')
+func collector(fileName string, lines chan string, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			break
-		}
+	file, _ := os.Open(fileName)
 
-		lines <- strings.TrimSuffix(string(b), "\n")
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		lines <- scanner.Text()
 	}
-	close(lines)
 }
 
 func worker(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup) {
