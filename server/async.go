@@ -1,10 +1,11 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"crypto/md5"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -19,11 +20,22 @@ func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 
 	desiredHash = strings.TrimPrefix(r.URL.Path, "/async/")
 
-	scanner, err := GetFileScanner("rockyou.txt")
+	err := r.ParseMultipartForm(200 << 20)
 
 	if err != nil {
-		fmt.Println("Erro ao abrir o arquivo.")
+		fmt.Fprintf(w, "O arquivo deve ter no máximo 200MB")
 	}
+
+	file, _, _ := r.FormFile("wordlist")
+
+	if file == nil {
+		fmt.Fprint(w, "Erro, nenhuma wordlist foi encontrada!")
+		return
+	}
+
+	var buf bytes.Buffer
+
+	io.Copy(&buf, file)
 
 	lines = make(chan string, 1000)
 	found = make(chan bool, 1)
@@ -36,7 +48,7 @@ func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 		go worker(ctx, cancel, &wg)
 	}
 
-	go collector(scanner, lines)
+	go collector(buf, lines)
 
 	wg.Wait()
 
@@ -50,9 +62,18 @@ func FindHashAsync(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func collector(scanner *bufio.Scanner, lines chan string) {
-	for scanner.Scan() {
-		lines <- scanner.Text()
+func collector(buf bytes.Buffer, lines chan string) {
+	for {
+		b, err := buf.ReadBytes('\n')
+
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			break
+		}
+
+		lines <- strings.TrimSuffix(string(b), "\n")
 	}
 	close(lines)
 }
